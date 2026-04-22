@@ -197,7 +197,10 @@ def resolve_command(name: str) -> CommandDef | None:
 
     Accepts names with or without the leading slash.
     """
-    return _COMMAND_LOOKUP.get(name.lower().lstrip("/"))
+    normalized = name.strip().lower()
+    if not normalized:
+        return None
+    return _COMMAND_LOOKUP.get(normalized.lstrip("/"))
 
 
 def _build_description(cmd: CommandDef) -> str:

@@ -110,6 +110,10 @@ class TestResolveCommand:
         assert resolve_command("/help").name == "help"
         assert resolve_command("/bg").name == "background"
 
+    def test_surrounding_whitespace_is_ignored(self):
+        assert resolve_command("  /HeLp  ").name == "help"
+        assert resolve_command("  Bg ").name == "background"
+
     def test_unknown_returns_none(self):
         assert resolve_command("nonexistent") is None
         assert resolve_command("") is None
