@@ -727,6 +727,27 @@ class BatchRunner:
         
         return batches
     
+    def _existing_max_shard_number(self, checkpoint_data: Dict[str, Any]) -> int:
+        """Highest shard number already on disk / in the checkpoint.
+
+        Considers both batch_stats keys and batch_N.jsonl files so a resumed
+        run numbers its shards after everything that exists (#95322).
+        """
+        import re as _re
+
+        numbers: list = []
+        for key in (checkpoint_data.get("batch_stats") or {}):
+            try:
+                numbers.append(int(key))
+            except (TypeError, ValueError):
+                continue
+        if self.output_dir.is_dir():
+            for path in self.output_dir.glob("batch_*.jsonl"):
+                match = _re.fullmatch(r"batch_(\d+)\.jsonl", path.name)
+                if match:
+                    numbers.append(int(match.group(1)))
+        return max(numbers) if numbers else -1
+
     def _load_checkpoint(self) -> Dict[str, Any]:
         """
         Load checkpoint data if it exists.
@@ -825,26 +846,19 @@ class BatchRunner:
         """
         filtered_dataset = []
         skipped_indices = []
-        
+
         for idx, entry in enumerate(self.dataset):
-            # Extract prompt from the dataset entry
-            prompt_text = entry.get("prompt", "").strip()
-            
-            # Also check conversations format
-            if not prompt_text:
-                conversations = entry.get("conversations", [])
-                for msg in conversations:
-                    role = msg.get("role") or msg.get("from")
-                    if role in {"user", "human"}:
-                        prompt_text = (msg.get("content") or msg.get("value", "")).strip()
-                        break
-            
+            # Shared extractor: tolerates non-string prompt values and
+            # conversations/messages shapes (#95322 — a raw .strip() here
+            # crashed whole resumes on one malformed row).
+            prompt_text = _entry_prompt_text(entry)
+
             if prompt_text in completed_prompts:
                 skipped_indices.append(idx)
             else:
                 # Keep original index for tracking
                 filtered_dataset.append((idx, entry))
-        
+
         return filtered_dataset, skipped_indices
     
     def run(self, resume: bool = False):
@@ -860,6 +874,7 @@ class BatchRunner:
         
         # Smart resume: scan batch files by content to find completed prompts
         completed_prompt_texts = set()
+        resumed_with_reindex = False
         if resume:
             completed_prompt_texts = self._scan_completed_prompts_by_content()
             if completed_prompt_texts:
@@ -880,6 +895,11 @@ class BatchRunner:
                 batches_to_process.append(batch)
             
             self.batches = batches_to_process
+            # Batches now carry CURRENT-file indices; the checkpoint's stale
+            # index set points at pre-edit positions and would wrongly skip
+            # rows inside workers (#95322). Content matching already did the
+            # exclusion — disable the worker-side index filter for this run.
+            resumed_with_reindex = True
             
             # Print prominent resume summary
             print("\n" + "=" * 70)
@@ -941,8 +961,14 @@ class BatchRunner:
             "prefill_messages": self.prefill_messages,
         }
         
-        # For backward compatibility, still track by index (but this is secondary to content matching)
-        completed_prompts_set = set(checkpoint_data.get("completed_prompts", []))
+        # For backward compatibility, still track by index on fresh runs. On a
+        # content-matched resume the batches were rebuilt with current-file
+        # indices, so replaying the checkpoint's stale index set would skip
+        # never-completed rows whose positions shifted (#95322).
+        if resumed_with_reindex:
+            completed_prompts_set = set()
+        else:
+            completed_prompts_set = set(checkpoint_data.get("completed_prompts", []))
         
         # Aggregate statistics across all batches
         total_tool_stats = {}
@@ -956,10 +982,15 @@ class BatchRunner:
 
         # Process batches in parallel
         with Pool(processes=self.num_workers) as pool:
+            # Continue shard numbering after any existing shards so a resumed
+            # run never appends into the previous run's batch_N.jsonl files
+            # or overwrites their batch_stats entries (#95322).
+            shard_offset = self._existing_max_shard_number(checkpoint_data) + 1 \
+                if resumed_with_reindex else 0
             # Create tasks for each batch
             tasks = [
                 (
-                    batch_num,
+                    shard_offset + batch_num,
                     batch_data,
                     str(self.output_dir),  # Convert Path to string for pickling
                     completed_prompts_set,
