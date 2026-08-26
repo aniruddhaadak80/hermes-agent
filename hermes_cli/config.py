@@ -2217,11 +2217,15 @@ def print_config_warnings(config: Optional[Dict[str, Any]] = None) -> None:
     if not issues:
         return
 
-    lines = ["\033[33m⚠ Config issues detected in config.yaml:\033[0m"]
+    # Route through hermes_cli.colors so NO_COLOR / non-TTY output stays
+    # clean — raw escapes here leak into piped logs and editors (#94024).
+    from hermes_cli.colors import Colors, color
+
+    lines = [color("⚠ Config issues detected in config.yaml:", Colors.YELLOW)]
     for ci in issues:
-        marker = "\033[31m✗\033[0m" if ci.severity == "error" else "\033[33m⚠\033[0m"
+        marker = color("✗", Colors.RED) if ci.severity == "error" else color("⚠", Colors.YELLOW)
         lines.append(f"  {marker} {ci.message}")
-    lines.append("  \033[2mRun 'hermes doctor' for fix suggestions.\033[0m")
+    lines.append("  " + color("Run 'hermes doctor' for fix suggestions.", Colors.DIM))
     sys.stderr.write("\n".join(lines) + "\n\n")
 
 
@@ -2238,31 +2242,37 @@ def warn_deprecated_cwd_env_vars() -> None:
     except Exception:
         return
 
+    # Same #94024 rationale as print_config_warnings: no raw ANSI in piped
+    # output — route through hermes_cli.colors.
+    from hermes_cli.colors import Colors, color
+
     messaging_cwd = str(env_map.get("MESSAGING_CWD") or "").strip()
     terminal_cwd_env = str(env_map.get("TERMINAL_CWD") or "").strip()
 
     lines: list[str] = []
     if messaging_cwd:
         lines.append(
-            f"  \033[33m⚠\033[0m MESSAGING_CWD={messaging_cwd} found in .env — "
+            f"  {color('⚠', Colors.YELLOW)} MESSAGING_CWD={messaging_cwd} found in .env — "
             f"this is deprecated."
         )
     if terminal_cwd_env:
         lines.append(
-            f"  \033[33m⚠\033[0m TERMINAL_CWD={terminal_cwd_env} found in .env — "
+            f"  {color('⚠', Colors.YELLOW)} TERMINAL_CWD={terminal_cwd_env} found in .env — "
             f"this is deprecated."
         )
     if lines:
         from hermes_constants import display_hermes_home
 
         hint_path = display_hermes_home()
-        lines.insert(0, "\033[33m⚠ Deprecated .env settings detected:\033[0m")
+        lines.insert(0, color("⚠ Deprecated .env settings detected:", Colors.YELLOW))
         lines.append(
-            "  \033[2mMove to config.yaml instead:  "
-            "terminal:\\n    cwd: /your/project/path\033[0m"
+            "  " + color(
+                "Move to config.yaml instead:  "
+                "terminal:\n    cwd: /your/project/path", Colors.DIM
+            )
         )
         lines.append(
-            f"  \033[2mThen remove the old entries from {hint_path}/.env\033[0m"
+            "  " + color(f"Then remove the old entries from {hint_path}/.env", Colors.DIM)
         )
         sys.stderr.write("\n".join(lines) + "\n\n")
 
