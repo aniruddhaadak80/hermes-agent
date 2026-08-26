@@ -77,6 +77,42 @@ def test_fs_download_rejects_sensitive_files(client, tmp_path):
     assert response.status_code == 403
 
 
+# ── #95311: standard non-Hermes credential stores must be blocked too — the
+# default managed root is the user's home directory, so .ssh/.aws/.gnupg/
+# .kube trees and netrc/npmrc/docker/gh credential files are live secret
+# stores in the browsable surface. ───────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "relpath",
+    [
+        ".ssh/id_ed25519",
+        ".ssh/id_rsa",
+        ".aws/config",
+        ".gnupg/pubring.kbx",
+        ".kube/config",
+        ".netrc",
+        ".npmrc",
+        ".docker/config.json",
+        ".config/gh/hosts.yml",
+        ".config/gcloud/credentials.db",
+        "mcp-tokens/server.json",
+    ],
+)
+def test_sensitive_paths_cover_standard_credential_stores(relpath):
+    assert web_server._is_sensitive_path(Path.home() / relpath) is True
+    # Component match is location-independent: same tree under any root.
+    assert web_server._is_sensitive_path(Path("X:/anywhere") / relpath) is True
+
+
+def test_denylist_does_not_over_block_generic_names():
+    # config.json / hosts.yml are only sensitive under their known parents.
+    assert web_server._is_sensitive_path(Path("/srv/app/config.json")) is False
+    assert web_server._is_sensitive_path(Path("/srv/app/hosts.yml")) is False
+    # Regular project files stay readable.
+    assert web_server._is_sensitive_path(Path("/srv/app/src/main.py")) is False
+
+
 def test_fs_endpoints_require_auth(tmp_path):
     client = TestClient(web_server.app)
     target = tmp_path / "secret.txt"

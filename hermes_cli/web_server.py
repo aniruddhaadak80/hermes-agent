@@ -2124,6 +2124,40 @@ _SENSITIVE_MANAGED_FILE_BASENAMES = frozenset({
 _SENSITIVE_MANAGED_DIR_NAMES = frozenset({
     "mcp-tokens",
     "pairing",
+    # Standard non-Hermes credential stores. The default managed root is the
+    # user's home directory (#95311), so these trees are live secret stores
+    # sitting in the browsable/readable surface exactly like mcp-tokens/:
+    # SSH private keys (.ssh), AWS configs+keys (.aws), GnuPG keyrings
+    # (.gnupg), cluster-admin kubeconfigs (.kube), gcloud service-account
+    # keys (.config/gcloud), GitHub CLI tokens (.config/gh), Tailscale node
+    # identity (.config/tailscale).
+    ".ssh",
+    ".aws",
+    ".gnupg",
+    ".kube",
+})
+
+# Basenames of standard credential files that live OUTSIDE dedicated
+# credential trees (so a directory-tree rule can't catch them). Deliberately
+# tiny: these names are unambiguous.
+_SENSITIVE_MANAGED_EXTRA_FILENAMES = frozenset({
+    ".netrc",        # FTP/SMTP credentials read by curl & friends
+    ".npmrc",        # _authToken registry tokens
+})
+
+# Path-suffix rules for credential files whose basename alone is too generic
+# to denylist globally (``config.json`` is half the internet's config name):
+# matched as (parent component, basename) pairs, case-insensitive, on ANY
+# ancestor position of the parent component.
+_SENSITIVE_MANAGED_PATH_PAIRS = frozenset({
+    (".docker", "config.json"),      # registry auth blobs
+    (".config", "hosts.yml"),        # gh CLI: stored GitHub tokens
+})
+
+# Subtree rules: (ancestor component, subtree component) — the whole subtree
+# is credential material when BOTH components appear anywhere in the path.
+_SENSITIVE_MANAGED_SUBTREE_PAIRS = frozenset({
+    (".config", "gcloud"),           # service-account keys, credentials.db
 })
 
 
@@ -2145,7 +2179,9 @@ def _is_sensitive_filename(name: str) -> bool:
     lowered = name.lower()
     if lowered == ".env" or lowered.startswith(".env.") or lowered == ".envrc":
         return True
-    return lowered in _SENSITIVE_MANAGED_FILE_BASENAMES
+    if lowered in _SENSITIVE_MANAGED_FILE_BASENAMES:
+        return True
+    return lowered in _SENSITIVE_MANAGED_EXTRA_FILENAMES
 
 
 def _is_sensitive_path(path: Path) -> bool:
@@ -2167,7 +2203,19 @@ def _is_sensitive_path(path: Path) -> bool:
     """
     if _is_sensitive_filename(path.name):
         return True
-    return any(part.lower() in _SENSITIVE_MANAGED_DIR_NAMES for part in path.parts)
+    lowered_parts = [part.lower() for part in path.parts]
+    if any(part in _SENSITIVE_MANAGED_DIR_NAMES for part in lowered_parts):
+        return True
+    # Standard credential files with generic basenames (docker config.json,
+    # gh hosts.yml): deny when the file sits under its known parent dir.
+    name_lower = path.name.lower()
+    for parent, basename in _SENSITIVE_MANAGED_PATH_PAIRS:
+        if name_lower == basename and parent in lowered_parts:
+            return True
+    for ancestor, subtree in _SENSITIVE_MANAGED_SUBTREE_PAIRS:
+        if ancestor in lowered_parts and subtree in lowered_parts:
+            return True
+    return False
 
 
 _FS_DATA_URL_MAX_BYTES = 16 * 1024 * 1024
