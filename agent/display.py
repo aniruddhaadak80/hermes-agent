@@ -1223,8 +1223,8 @@ class KawaiiSpinner:
         # When running inside prompt_toolkit's patch_stdout context the CLI
         # renders spinner state via a dedicated TUI widget (_spinner_text).
         # Driving a \r-based animation here too causes visual overdraw: the
-        # StdoutProxy injects newlines around each flush, so every frame lands
-        # on a new line and overwrites the status bar.
+        # StdoutProxy injects newlines around each flush, so every spinner frame
+        # lands on its own line and overwrites the status bar.
         if self._is_patch_stdout_proxy():
             while self.running:
                 time.sleep(0.1)
@@ -1234,6 +1234,12 @@ class KawaiiSpinner:
         skin = _get_skin()
         wings = skin.get_spinner_wings() if skin else []
 
+        # Terminal width detection (fallback to 80 if unavailable)
+        try:
+            term_width = os.get_terminal_size().columns
+        except Exception:
+            term_width = 80
+
         while self.running:
             if os.getenv("HERMES_SPINNER_PAUSE"):
                 time.sleep(0.1)
@@ -1242,9 +1248,21 @@ class KawaiiSpinner:
             elapsed = time.time() - self.start_time
             if wings:
                 left, right = wings[self.frame_idx % len(wings)]
-                line = f"  {left} {frame} {self.message} {right} ({elapsed:.1f}s)"
+                prefix = f"  {left} "
+                suffix = f" {right} "
             else:
-                line = f"  {frame} {self.message} ({elapsed:.1f}s)"
+                prefix = "  "
+                suffix = " "
+
+            # Reserve space for: prefix + frame + message + suffix + elapsed + "s)"
+            # Elapsed format: "(XX.Xs)" -> max 8 chars
+            reserved = len(prefix) + len(self.spinner_frames[0]) + len(suffix) + 8 + 3  # +3 for "s)"
+            max_msg_len = max(term_width - reserved, 10)
+            msg = self.message
+            if len(msg) > max_msg_len:
+                msg = msg[:max_msg_len - 1] + "…"
+
+            line = f"{prefix}{frame} {msg}{suffix}({elapsed:.1f}s)"
             pad = max(self.last_line_len - len(line), 0)
             self._write(f"\r{line}{' ' * pad}", end='', flush=True)
             self.last_line_len = len(line)
