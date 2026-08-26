@@ -3351,9 +3351,10 @@ def _get_due_jobs_locked() -> List[Dict[str, Any]]:
             rj["id"] = rj.pop("job_id", None) or uuid.uuid4().hex[:12]
             needs_save = True
 
-    jobs = [_apply_skill_fields(j) for j in copy.deepcopy(raw_jobs)]
-    due = []
-
+    # Normalize malformed records ONCE on the persistence view (raw_jobs);
+    # the evaluation view below is derived from the normalized state so the
+    # tick does a single validation pass instead of one per view (#95320).
+    #
     # Normalize malformed "schedule" records (direct jobs.json edit, old writers,
     # corruption, etc.). "schedule" must be a dict; a null/string/etc. value
     # makes `schedule.get("kind")` or direct `schedule["kind"]` / ["expr"] /
@@ -3362,10 +3363,6 @@ def _get_due_jobs_locked() -> List[Dict[str, Any]]:
     # failure mode of the id-less job bug fixed above). Repair early at the
     # source so the rest of the tick can proceed and persist progress for
     # siblings.
-    for j in jobs:
-        if not isinstance(j.get("schedule"), dict):
-            j["schedule"] = {}
-            needs_save = True
     for rj in raw_jobs:
         if not isinstance(rj.get("schedule"), dict):
             rj["schedule"] = {}
@@ -3378,18 +3375,6 @@ def _get_due_jobs_locked() -> List[Dict[str, Any]]:
     # fast-forwarded next_run_at (same class of bug as bad "id" or "schedule").
     # Strip the bad value so the existing "no next_run_at" recovery path
     # recomputes a sane value and persists it for this job.
-    for j in jobs:
-        nr = j.get("next_run_at")
-        if nr is not None:
-            if not isinstance(nr, str):
-                j.pop("next_run_at", None)
-                needs_save = True
-            else:
-                try:
-                    datetime.fromisoformat(nr)
-                except Exception:
-                    j.pop("next_run_at", None)
-                    needs_save = True
     for rj in raw_jobs:
         nr = rj.get("next_run_at")
         if nr is not None:
@@ -3404,17 +3389,6 @@ def _get_due_jobs_locked() -> List[Dict[str, Any]]:
                     needs_save = True
 
     # Same treatment for last_run_at (used as base in recovery / compute_next_run).
-    for j in jobs:
-        lr = j.get("last_run_at")
-        if lr is not None and not isinstance(lr, str):
-            j.pop("last_run_at", None)
-            needs_save = True
-        elif isinstance(lr, str):
-            try:
-                datetime.fromisoformat(lr)
-            except Exception:
-                j.pop("last_run_at", None)
-                needs_save = True
     for rj in raw_jobs:
         lr = rj.get("last_run_at")
         if lr is not None and not isinstance(lr, str):
@@ -3427,6 +3401,12 @@ def _get_due_jobs_locked() -> List[Dict[str, Any]]:
                 rj.pop("last_run_at", None)
                 needs_save = True
 
+    # Evaluation view: isolated deep copy of the NORMALIZED persistence view,
+    # with skill fields canonicalized. Derived after normalization so the
+    # tick validates once, not once per view (#95320).
+    jobs = [_apply_skill_fields(j) for j in copy.deepcopy(raw_jobs)]
+    due = []
+
     # Resolve the one-shot running-claim stale-recovery TTL once per scan
     # (derived from HERMES_CRON_TIMEOUT). See _oneshot_run_claim_ttl_seconds.
     _run_claim_ttl = _oneshot_run_claim_ttl_seconds()
@@ -3438,7 +3418,8 @@ def _get_due_jobs_locked() -> List[Dict[str, Any]]:
     # window each scan.
     if _sweep_completed_oneshots(raw_jobs, now, removed_ids=intentionally_removed):
         needs_save = True
-        jobs = [j for j in jobs if any(rj.get("id") == j.get("id") for rj in raw_jobs)]
+        kept_ids = {rj.get("id") for rj in raw_jobs}
+        jobs = [j for j in jobs if j.get("id") in kept_ids]
 
     for job in jobs:
         # Per-job containment (structural guard): one malformed or
