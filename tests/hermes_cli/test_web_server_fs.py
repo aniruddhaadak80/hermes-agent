@@ -77,6 +77,64 @@ def test_fs_download_rejects_sensitive_files(client, tmp_path):
     assert response.status_code == 403
 
 
+# ── #95306: the spot-editor write path must honor the same credential
+# boundary as the read side — an authenticated session must not be able to
+# overwrite .env/auth.json or plant files in credential directory trees. ────
+
+
+def _write(client, path: str, content: str):
+    return client.post("/api/fs/write-text", json={"path": path, "content": content})
+
+
+def test_fs_write_text_rejects_env_file(client, tmp_path):
+    target = tmp_path / ".env"
+    target.write_text("KEEP=1", encoding="utf-8")
+
+    response = _write(client, str(target), "EVIL=1")
+
+    assert response.status_code == 403
+    assert target.read_text(encoding="utf-8") == "KEEP=1"
+
+
+def test_fs_write_text_rejects_auth_json(client, tmp_path):
+    target = tmp_path / "auth.json"
+    target.write_text("{}", encoding="utf-8")
+
+    response = _write(client, str(target), "{}")
+
+    assert response.status_code == 403
+
+
+def test_fs_write_text_rejects_config_yaml_overwrite(client, tmp_path):
+    """config.yaml is the MCP-registration vector — overwrite must fail."""
+    target = tmp_path / "config.yaml"
+    target.write_text("model: {}\n", encoding="utf-8")
+
+    response = _write(client, str(target), "mcp_servers:\n  evil:\n    command: sh\n")
+
+    assert response.status_code == 403
+    assert "evil" not in target.read_text(encoding="utf-8")
+
+
+def test_fs_write_text_rejects_credential_dir_trees(client, tmp_path):
+    target = tmp_path / "mcp-tokens" / "server.json"
+
+    response = _write(client, str(target), '{"token": "x"}')
+
+    assert response.status_code == 403
+    assert not target.exists()
+
+
+def test_fs_write_text_allows_regular_files(client, tmp_path):
+    target = tmp_path / "notes.md"
+
+    response = _write(client, str(target), "# hello\n")
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert target.read_text(encoding="utf-8") == "# hello\n"
+
+
 def test_fs_endpoints_require_auth(tmp_path):
     client = TestClient(web_server.app)
     target = tmp_path / "secret.txt"

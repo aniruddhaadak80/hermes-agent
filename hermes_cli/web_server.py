@@ -3038,6 +3038,13 @@ async def fs_write_text(payload: FsWriteText):
     so both transports behave identically.
     """
     target = _fs_path(payload.path)
+    # The write path must honor the same credential-store boundary as the
+    # read side (#57505): an authenticated session must not be able to
+    # overwrite .env / auth.json / config.yaml (config.yaml would let a
+    # later session register an arbitrary MCP stdio command) or plant files
+    # in credential directory trees.
+    if _is_sensitive_path(target):
+        raise HTTPException(status_code=403, detail="Access to sensitive files is not allowed")
     text = payload.content or ""
     if len(text.encode("utf-8")) > _FS_TEXT_WRITE_MAX_BYTES:
         raise HTTPException(status_code=413, detail="Content too large")
