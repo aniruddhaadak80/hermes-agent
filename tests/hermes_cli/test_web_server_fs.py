@@ -77,6 +77,56 @@ def test_fs_download_rejects_sensitive_files(client, tmp_path):
     assert response.status_code == 403
 
 
+# ── #95303: the preview endpoints sit right beside /api/fs/download and
+# must enforce the same #57505 sensitive-file guard. ─────────────────────────
+
+
+def test_fs_read_text_rejects_env_file(client, tmp_path):
+    target = tmp_path / ".env"
+    target.write_text("SECRET=1", encoding="utf-8")
+
+    response = client.get("/api/fs/read-text", params={"path": str(target)})
+
+    assert response.status_code == 403
+
+
+def test_fs_read_text_rejects_auth_json(client, tmp_path):
+    target = tmp_path / "auth.json"
+    target.write_text("{}", encoding="utf-8")
+
+    response = client.get("/api/fs/read-text", params={"path": str(target)})
+
+    assert response.status_code == 403
+
+
+def test_fs_read_data_url_rejects_env_file(client, tmp_path):
+    target = tmp_path / ".env"
+    target.write_text("SECRET=1", encoding="utf-8")
+
+    response = client.get("/api/fs/read-data-url", params={"path": str(target)})
+
+    assert response.status_code == 403
+
+
+def test_fs_read_text_allows_regular_files(client, tmp_path):
+    target = tmp_path / "notes.md"
+    target.write_bytes(b"# hello\n")
+
+    response = client.get("/api/fs/read-text", params={"path": str(target)})
+
+    assert response.status_code == 200
+    assert response.json()["text"] == "# hello\n"
+
+
+def test_fs_read_data_url_allows_regular_files(client, tmp_path):
+    target = tmp_path / "pixel.png"
+    target.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    response = client.get("/api/fs/read-data-url", params={"path": str(target)})
+
+    assert response.status_code == 200
+
+
 def test_fs_endpoints_require_auth(tmp_path):
     client = TestClient(web_server.app)
     target = tmp_path / "secret.txt"
