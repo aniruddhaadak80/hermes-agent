@@ -9783,6 +9783,89 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
             current = child_id
         return current
 
+    def _resolve_compression_tips_batch(self, session_ids: List[str]) -> Dict[str, str]:
+        """Resolve continuation tips for many roots with per-depth batching.
+
+        Semantics are identical to :meth:`get_compression_tip` — the same
+        child filter, the same greedy per-hop ORDER BY, the same cycle
+        guard — but children for ALL current frontier nodes are fetched in
+        ONE query per depth level on the read pool instead of one locked
+        query per hop per root (#95316). Typical chains are 1-3 deep, so a
+        page of R compression roots drops from R×D locked queries to D
+        lock-free ones.
+        """
+        if not session_ids:
+            return {}
+
+        tips: Dict[str, str] = {}
+        frontier: Dict[str, str] = {}  # current node id -> chain root
+        seen: Dict[str, Set[str]] = {}  # root -> nodes visited on ITS walk
+        for sid in session_ids:
+            tips[sid] = sid
+            frontier[sid] = sid
+            seen[sid] = {sid}
+        # NOTE: chains live in a tree (parent_session_id is single-parent), so
+        # per-root seen sets are the correct cycle guard — a shared global set
+        # would let one root's seed block another root's traversal when one
+        # seed is also a descendant of the other (mid1 seeded alongside root1).
+
+        # Same bound as get_compression_tip's defensive walk.
+        for _ in range(100):
+            if not frontier:
+                break
+            placeholders = ",".join("?" for _ in frontier)
+            with self._read_ctx() as conn:
+                cursor = conn.execute(
+                    f"""
+                    SELECT parent.id AS parent_id, child.id AS child_id
+                    FROM sessions parent
+                    JOIN sessions child ON child.parent_session_id = parent.id
+                    WHERE parent.id IN ({placeholders})
+                      AND parent.end_reason = 'compression'
+                      AND json_extract(COALESCE(child.model_config, '{{}}'), '$._branched_from') IS NULL
+                      AND json_extract(COALESCE(child.model_config, '{{}}'), '$._delegate_from') IS NULL
+                      AND COALESCE(child.source, '') != 'tool'
+                    ORDER BY
+                      CASE
+                        WHEN child.end_reason = 'compression' THEN 0
+                        WHEN child.ended_at IS NULL THEN 1
+                        ELSE 2
+                      END,
+                      {_sql_session_last_active("child")} DESC,
+                      child.started_at DESC,
+                      child.id DESC
+                    """,
+                    list(frontier.keys()),
+                )
+                rows = cursor.fetchall()
+
+            next_frontier: Dict[str, str] = {}
+            best_child: Dict[str, str] = {}
+            for row in rows:
+                parent_id = row["parent_id"]
+                child_id = row["child_id"]
+                if parent_id not in best_child:
+                    # Rows arrive already in the walk's preference order, so
+                    # the first child per parent IS the greedy pick.
+                    best_child[parent_id] = child_id
+
+            advanced = False
+            for node_id, root_id in frontier.items():
+                child_id = best_child.get(node_id)
+                root_seen = seen[root_id]
+                if not child_id or child_id in root_seen:
+                    continue
+                root_seen.add(child_id)
+                tips[root_id] = child_id
+                next_frontier[child_id] = root_id
+                advanced = True
+
+            frontier = next_frontier
+            if not advanced:
+                break
+
+        return tips
+
     # Columns excluded from compact_rows projections: only the payload-heavy
     # blob no list consumer renders. Everything else — including gateway
     # routing fields and desktop sidebar fields like git_branch — stays, and
@@ -10153,18 +10236,22 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         # as the live conversation. Keep the root's started_at to preserve
         # chronological ordering by original conversation start.
         if project_compression_tips and not include_children:
-            # get_compression_tip() walks each root's chain individually (it's
-            # a per-session graph walk, not batchable in one query), but the
-            # tip *row* fetch afterward was previously one _get_session_rich_row()
-            # call per compression root. Batch that half instead: resolve
-            # every tip id first, then fetch all tip rows in a single query.
+            # Resolve every root's continuation tip with batched per-depth
+            # queries (#95316): the previous per-row get_compression_tip()
+            # walk issued R×D separate queries, each acquiring the store's
+            # global write lock, so sidebar reads serialized against
+            # concurrent message writes. The batch resolver replays the
+            # identical per-hop ordering over one query per depth level on
+            # the read pool, keeping tip selection byte-identical.
             tip_ids_by_root: Dict[str, str] = {}
-            for s in sessions:
-                if s.get("end_reason") != "compression":
-                    continue
-                tip_id = self.get_compression_tip(s["id"])
-                if tip_id != s["id"]:
-                    tip_ids_by_root[s["id"]] = tip_id
+            root_ids = [
+                s["id"] for s in sessions if s.get("end_reason") == "compression"
+            ]
+            if root_ids:
+                resolved = self._resolve_compression_tips_batch(root_ids)
+                tip_ids_by_root = {
+                    root: tip for root, tip in resolved.items() if tip != root
+                }
 
             tip_rows = (
                 self._get_session_rich_rows_batch(

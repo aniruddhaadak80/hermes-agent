@@ -2675,6 +2675,58 @@ class TestCompressionChainProjection:
         assert db.get_compression_tip("mid1") == "tip1"
         assert db.get_compression_tip("tip1") == "tip1"
 
+    def test_batch_tip_resolver_matches_single_walk(self, db):
+        """#95316: the batched resolver must agree with get_compression_tip."""
+        import time as _time
+        self._build_compression_chain(db, _time.time() - 3600)
+
+        resolved = db._resolve_compression_tips_batch(["root1", "mid1", "tip1"])
+
+        assert resolved["root1"] == db.get_compression_tip("root1")
+        assert resolved["mid1"] == db.get_compression_tip("mid1")
+        assert resolved["tip1"] == db.get_compression_tip("tip1")
+
+    def test_batch_tip_resolver_handles_independent_chains(self, db):
+        import time as _time
+        base = _time.time() - 3600
+        self._build_compression_chain(db, base)
+        # Second, unrelated chain: rootB -> tipB.
+        db.create_session("rootB", "cli")
+        db.append_message("rootB", "user", "second chain")
+        t_end = base + 100
+        db._conn.execute(
+            "UPDATE sessions SET ended_at=?, end_reason=? WHERE id=?",
+            (t_end, "compression", "rootB"),
+        )
+        db.create_session("tipB", "cli", parent_session_id="rootB")
+        db._conn.execute(
+            "UPDATE sessions SET started_at=? WHERE id=?", (t_end + 1, "tipB")
+        )
+        db.append_message("tipB", "user", "b continuation")
+        db._conn.commit()
+
+        resolved = db._resolve_compression_tips_batch(["root1", "rootB"])
+
+        assert resolved == {"root1": "tip1", "rootB": "tipB"}
+
+    def test_list_order_by_last_active_projects_tips_via_batch(self, db):
+        """The order_by_last_active path must keep projecting roots to tips
+        now that it goes through the batched resolver (#95316)."""
+        import time as _time
+        self._build_compression_chain(db, _time.time() - 3600)
+        db.create_session("solo", "cli")
+        db.append_message("solo", "user", "standalone")
+        db._conn.commit()
+
+        sessions = db.list_sessions_rich(
+            source="cli", limit=20, order_by_last_active=True
+        )
+        ids = [s["id"] for s in sessions]
+
+        assert "tip1" in ids
+        assert "root1" not in ids
+        assert "mid1" not in ids
+
 
 
     def test_list_surfaces_tip_for_compressed_root(self, db):
