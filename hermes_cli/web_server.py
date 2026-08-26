@@ -45,6 +45,7 @@ import urllib.error
 import urllib.parse
 import zipfile
 
+from hermes_cli.auth import has_usable_secret
 from hermes_cli._subprocess_compat import windows_detach_flags, windows_hide_flags
 import urllib.request
 from pathlib import Path
@@ -537,7 +538,10 @@ app.include_router(_memory_oauth_router)
 
 
 def _resolve_session_token() -> str:
-    return os.environ.get("HERMES_DASHBOARD_SESSION_TOKEN") or secrets.token_urlsafe(32)
+    token = os.environ.get("HERMES_DASHBOARD_SESSION_TOKEN")
+    if token and has_usable_secret(token, min_length=16):
+        return token
+    return secrets.token_urlsafe(32)
 
 
 _SESSION_TOKEN = _resolve_session_token()
