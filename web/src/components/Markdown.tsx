@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 
 /**
  * Lightweight markdown renderer for LLM output.
@@ -8,8 +8,12 @@ import { useMemo, type ReactNode } from "react";
  * `streaming` renders a blinking caret at the tail of the last block so it
  * appears to hug the final character instead of wrapping onto a new line
  * after a block element (paragraph/list/code/…).
+ *
+ * ⚡ Bolt: Wrapped in React.memo to prevent unnecessary re-renders of unchanged chat messages
+ * when the parent SessionsPage updates or when new messages stream in. This significantly
+ * improves render performance for long conversations.
  */
-export function Markdown({
+export const Markdown = memo(function Markdown({
   content,
   highlightTerms,
   streaming,
@@ -34,7 +38,7 @@ export function Markdown({
       {blocks.length === 0 && caret}
     </div>
   );
-}
+});
 
 function StreamingCaret() {
   return (
