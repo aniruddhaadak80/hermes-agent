@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       # Windows PowerShell 5.1 as well as pwsh 7: install.ps1 is delivered via
       # `irm | iex` into whatever shell the user already has, and 5.1 is what
