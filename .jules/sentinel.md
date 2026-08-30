@@ -1,4 +1,4 @@
-## 2024-08-30 - Subprocess Environment Sanitization
-**Vulnerability:** Found `subprocess.run` calls without `env` specified in processes that hold API keys in `os.environ` (like the TUI server process executing `shell.exec`).
-**Learning:** The default behavior of `subprocess.run` (and similar functions) is to inherit `os.environ` of the parent process. If a process holds API keys in its environment and runs user-provided or plugin commands without sanitizing the environment, those keys are leaked to the child processes.
-**Prevention:** Always pass `env=build_subprocess_env()` (imported from `tools.environments.local`) when spawning subprocesses from sensitive components (like `tui_gateway/methods_tools.py`) to prevent environment variable leakage.
+## 2024-05-18 - Prevent Secret Leakage in `shell.exec`
+**Vulnerability:** The `shell.exec` method in `tui_gateway/methods_tools.py` executed arbitrary shell commands (`subprocess.run(..., shell=True)`) without sanitizing the environment variables. Because the TUI server process holds API keys and secrets in `os.environ`, these secrets could be leaked to the shell environment of the child process.
+**Learning:** Even though `shell.exec` passes through an approval gate, any command that gets approved could inadvertently access or leak secrets if the environment isn't sanitized.
+**Prevention:** Always use `build_subprocess_env()` from `tools.environments.local` to sanitize the environment before executing shell commands that shouldn't inherit the parent process's credentials.
