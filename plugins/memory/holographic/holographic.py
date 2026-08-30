@@ -54,7 +54,7 @@ def encode_atom(word: str, dim: int = 1024) -> "np.ndarray":
 
     Algorithm:
     - Generate enough SHA-256 blocks by hashing f"{word}:{i}" for i=0,1,2,...
-    - Concatenate digests, interpret as uint16 values via struct.unpack
+    - Concatenate digests, interpret as uint16 values
     - Scale to [0, 2π): phases = values * (2π / 65536)
     - Truncate to dim elements
     - Returns np.float64 array of shape (dim,)
@@ -65,12 +65,13 @@ def encode_atom(word: str, dim: int = 1024) -> "np.ndarray":
     values_per_block = 16
     blocks_needed = math.ceil(dim / values_per_block)
 
-    uint16_values: list[int] = []
+    byte_array = bytearray()
     for i in range(blocks_needed):
         digest = hashlib.sha256(f"{word}:{i}".encode()).digest()
-        uint16_values.extend(struct.unpack("<16H", digest))
+        byte_array.extend(digest)
 
-    phases = np.array(uint16_values[:dim], dtype=np.float64) * (_TWO_PI / 65536.0)
+    uint16_values = np.frombuffer(byte_array, dtype="<u2")
+    phases = uint16_values[:dim].astype(np.float64) * (_TWO_PI / 65536.0)
     return phases
 
 
@@ -101,8 +102,10 @@ def bundle(*vectors: "np.ndarray") -> "np.ndarray":
     The result can hold O(sqrt(dim)) items before similarity degrades.
     """
     _require_numpy()
-    complex_sum = np.sum([np.exp(1j * v) for v in vectors], axis=0)
-    return np.angle(complex_sum) % _TWO_PI
+    stacked = np.stack(vectors)
+    sum_cos = np.sum(np.cos(stacked), axis=0)
+    sum_sin = np.sum(np.sin(stacked), axis=0)
+    return np.arctan2(sum_sin, sum_cos) % _TWO_PI
 
 
 def similarity(a: "np.ndarray", b: "np.ndarray") -> float:
