@@ -110,8 +110,8 @@ def _session_source_for_agent(platform: Optional[str]) -> str:
 # siblings, or the `_ra().<X>` indirection in agent/system_prompt.py — none
 # of which ruff's in-module usage scan can see.
 from agent.process_bootstrap import (
-    OpenAI,  # noqa: F401  # re-exported for tests that mock.patch("run_agent.OpenAI")
-    _SafeWriter,  # noqa: F401  # re-exported for tests that `from run_agent import _SafeWriter`
+    OpenAI,  # noqa: F401
+    _SafeWriter,  # noqa: F401
     _get_proxy_for_base_url,
 )
 from agent.iteration_budget import IterationBudget
