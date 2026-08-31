@@ -471,9 +471,11 @@ def _run_bootstrap(cwd: Path, commands: List[str]) -> None:
     Each command runs through the shell (so `&&` etc. work). The output is
     streamed to the user's terminal for visibility.
     """
+    from tools.environments.local import build_subprocess_env
+
     for cmd in commands:
         print(color(f"  $ {cmd}", Colors.DIM))
-        proc = subprocess.run(cmd, cwd=str(cwd), shell=True)
+        proc = subprocess.run(cmd, cwd=str(cwd), shell=True, env=build_subprocess_env())
         if proc.returncode != 0:
             raise CatalogError(
                 f"bootstrap step failed (exit {proc.returncode}): {cmd}"
