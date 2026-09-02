@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from tools.environments.local import build_subprocess_env
+
 from agent.verify.recipes import Recipe
 
 DEFAULT_PHASE_TIMEOUT = 600.0
@@ -118,6 +120,7 @@ def _run_phase_command(
             timeout=timeout,
             text=True,
             errors="replace",
+            env=build_subprocess_env(),
         )
         output = proc.stdout or ""
         exit_code: int | None = proc.returncode
