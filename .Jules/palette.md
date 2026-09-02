@@ -1,0 +1,1 @@
+## 2024-03-24 - Focus Visible Styles\n**Learning:** Icon-only dismiss buttons in banners (like MemoryPressureBanner) often miss keyboard focus states, making them inaccessible for keyboard users.\n**Action:** Always ensure icon-only buttons have `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current/40 rounded` classes applied to them.
