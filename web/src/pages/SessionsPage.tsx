@@ -334,6 +334,17 @@ function MessageBubble({
     },
   };
 
+  // Split search query into terms for inline highlighting
+  const highlightTerms = useMemo(() => {
+    if (!highlight || !msg.content) return undefined;
+    const content = msg.content.toLowerCase();
+    const terms = highlight.toLowerCase().split(/\s+/).filter(Boolean);
+    const hit = terms.some((term) => content.includes(term));
+    return hit ? terms : undefined;
+  }, [highlight, msg.content]);
+
+  const isHit = highlightTerms !== undefined;
+
   // When a compaction handoff is merged into the front of the first
   // tail message (the compressor's double-collision path —
   // ``_merge_summary_into_tail`` in ``agent/context_compressor.py``),
@@ -378,18 +389,6 @@ function MessageBubble({
     : msg.tool_name
       ? `${t.sessions.roles.tool}: ${msg.tool_name}`
       : style.label;
-
-  // Check if any search term appears as a prefix of any word in content
-  const isHit = (() => {
-    if (!highlight || !msg.content) return false;
-    const content = msg.content.toLowerCase();
-    const terms = highlight.toLowerCase().split(/\s+/).filter(Boolean);
-    return terms.some((term) => content.includes(term));
-  })();
-
-  // Split search query into terms for inline highlighting
-  const highlightTerms =
-    isHit && highlight ? highlight.split(/\s+/).filter(Boolean) : undefined;
 
   return (
     <div
