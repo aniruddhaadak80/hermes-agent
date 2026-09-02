@@ -2,3 +2,11 @@
 **Vulnerability:** The `shell.exec` method in `tui_gateway/methods_tools.py` executed arbitrary shell commands (`subprocess.run(..., shell=True)`) without sanitizing the environment variables. Because the TUI server process holds API keys and secrets in `os.environ`, these secrets could be leaked to the shell environment of the child process.
 **Learning:** Even though `shell.exec` passes through an approval gate, any command that gets approved could inadvertently access or leak secrets if the environment isn't sanitized.
 **Prevention:** Always use `build_subprocess_env()` from `tools.environments.local` to sanitize the environment before executing shell commands that shouldn't inherit the parent process's credentials.
+## 2026-09-02 - Prevent Secret Leakage in Agent Shell Executions
+**Vulnerability:**  calls in the  directory (specifically , , and ) lacked environment sanitization, inheriting the parent process's environment variables (), which could inadvertently leak API keys and secrets to the spawned shell processes.
+**Learning:** Even isolated shell commands in agent workflows (like evaluating inline shell snippets or checking a verify phase) can expose the whole application's secrets if the environment isn't explicitly scoped down.
+**Prevention:** Adopt the pattern of explicitly supplying `env=build_subprocess_env()` (from `tools.environments.local`) whenever calling `subprocess.run` to ensure a scrubbed environment that doesn't bleed credentials.
+## 2025-03-08 - Prevent Secret Leakage in Agent Shell Executions
+**Vulnerability:** `subprocess.run(..., shell=True)` calls in the `agent/` directory (specifically `agent/command_token_source.py`, `agent/skill_preprocessing.py`, and `agent/verify/runner.py`) lacked environment sanitization, inheriting the parent process's environment variables (`os.environ`), which could inadvertently leak API keys and secrets to the spawned shell processes.
+**Learning:** Even isolated shell commands in agent workflows (like evaluating inline shell snippets or checking a verify phase) can expose the whole application's secrets if the environment isn't explicitly scoped down.
+**Prevention:** Adopt the pattern of explicitly supplying `env=build_subprocess_env()` (from `tools.environments.local`) whenever calling `subprocess.run` to ensure a scrubbed environment that doesn't bleed credentials.
