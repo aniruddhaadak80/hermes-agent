@@ -3785,7 +3785,7 @@ def _load_gateway_config(config_path: "Path | None" = None) -> dict:
 
     Managed scope is overlaid on the result (via the shared helper) so the
     gateway honors administrator-pinned values — neither read_raw_config nor a
-    direct yaml.safe_load carries the managed merge on its own. Fail-open.
+    direct fast_safe_load carries the managed merge on its own. Fail-open.
     """
     if config_path is None:
         config_path = _gateway_config_home() / 'config.yaml'
@@ -3808,7 +3808,7 @@ def _load_gateway_config(config_path: "Path | None" = None) -> dict:
             if config_path.exists():
                 import yaml
                 with open(config_path, 'r', encoding='utf-8') as f:
-                    raw = yaml.safe_load(f) or {}
+                    raw = fast_safe_load(f) or {}
         except Exception:
             logger.debug("Could not load gateway config from %s", config_path)
             raw = {}
@@ -32543,7 +32543,7 @@ def main():
     if args.config:
         import yaml
         with open(args.config, encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
+            data = fast_safe_load(f) or {}
             config = GatewayConfig.from_dict(data)
     
     # start_gateway() performs the full graceful teardown (adapters

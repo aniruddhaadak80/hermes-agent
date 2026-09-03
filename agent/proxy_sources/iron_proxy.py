@@ -898,7 +898,7 @@ def _read_management_listen_from_config(
     except ImportError:
         return None
     try:
-        data = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+        data = fast_safe_load(cfg.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError):
         return None
     listen = ((data or {}).get("management") or {}).get("listen") or ""
@@ -2403,7 +2403,7 @@ def _read_http_listen_from_config() -> Optional[Tuple[str, int]]:
     except ImportError:
         return None
     try:
-        data = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+        data = fast_safe_load(cfg.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError):
         return None
     proxy_block = (data or {}).get("proxy") or {}

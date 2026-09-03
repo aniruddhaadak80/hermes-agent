@@ -1363,7 +1363,7 @@ class GitHubSource(SkillSource):
             return {}
         yaml_text = content[3:match.start() + 3]
         try:
-            parsed = yaml.safe_load(yaml_text)
+            parsed = fast_safe_load(yaml_text)
             return parsed if isinstance(parsed, dict) else {}
         except yaml.YAMLError:
             return {}
@@ -3942,7 +3942,7 @@ class OptionalSkillSource(SkillSource):
             return {}
         yaml_text = content[3:match.start() + 3]
         try:
-            parsed = yaml.safe_load(yaml_text)
+            parsed = fast_safe_load(yaml_text)
             return parsed if isinstance(parsed, dict) else {}
         except yaml.YAMLError:
             return {}

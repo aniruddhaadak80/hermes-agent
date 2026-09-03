@@ -125,7 +125,7 @@ def _load_bundle_file(path: Path) -> Optional[Dict[str, Any]]:
         logger.warning("Could not read bundle %s: %s", path, exc)
         return None
     try:
-        data = yaml.safe_load(raw)
+        data = fast_safe_load(raw)
     except yaml.YAMLError as exc:
         logger.warning("Invalid YAML in bundle %s: %s", path, exc)
         return None

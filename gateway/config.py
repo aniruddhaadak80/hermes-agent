@@ -1403,7 +1403,7 @@ def load_gateway_config() -> GatewayConfig:
         config_yaml_path = _home / "config.yaml"
         if config_yaml_path.exists():
             with open(config_yaml_path, encoding="utf-8") as f:
-                yaml_cfg = yaml.safe_load(f) or {}
+                yaml_cfg = fast_safe_load(f) or {}
 
             # Managed scope: overlay administrator-pinned values so the gateway
             # honors them too. This loader builds its own dict instead of going

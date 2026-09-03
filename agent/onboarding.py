@@ -231,7 +231,7 @@ def mark_seen(config_path: Path, flag: str) -> bool:
         cfg: dict = {}
         if config_path.exists():
             with open(config_path, encoding="utf-8") as f:
-                cfg = yaml.safe_load(f) or {}
+                cfg = fast_safe_load(f) or {}
         if not isinstance(cfg.get("onboarding"), dict):
             cfg["onboarding"] = {}
         seen = cfg["onboarding"].get("seen")
