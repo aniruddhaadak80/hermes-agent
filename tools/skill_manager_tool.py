@@ -624,7 +624,7 @@ def _validate_frontmatter(content: str, *, new_skill: bool = False) -> Optional[
     yaml_content = content[3:end_match.start() + 3]
 
     try:
-        parsed = yaml.safe_load(yaml_content)
+        parsed = fast_safe_load(yaml_content)
     except yaml.YAMLError as e:
         return f"YAML frontmatter parse error: {e}"
 
@@ -986,7 +986,7 @@ def _create_skill(name: str, content: str, category: str = None) -> Dict[str, An
     try:
         _fm_end = re.search(r'\n---\s*\n', content[3:])
         if _fm_end:
-            _parsed = yaml.safe_load(content[3:_fm_end.start() + 3])
+            _parsed = fast_safe_load(content[3:_fm_end.start() + 3])
             _desc = str(_parsed.get("description", ""))[:120]
     except Exception:
         pass
@@ -1080,7 +1080,7 @@ def _edit_skill(name: str, content: str) -> Dict[str, Any]:
     try:
         _fm_end = re.search(r'\n---\s*\n', content[3:])
         if _fm_end:
-            _parsed = yaml.safe_load(content[3:_fm_end.start() + 3])
+            _parsed = fast_safe_load(content[3:_fm_end.start() + 3])
             _desc = str(_parsed.get("description", ""))[:120]
     except Exception:
         pass

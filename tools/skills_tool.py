@@ -608,7 +608,7 @@ def _parse_tags(tags_value) -> List[str]:
     Parse tags from frontmatter value.
 
     Handles:
-    - Already-parsed list (from yaml.safe_load): [tag1, tag2]
+    - Already-parsed list (from fast_safe_load): [tag1, tag2]
     - String with brackets: "[tag1, tag2]"
     - Comma-separated string: "tag1, tag2"
 
@@ -621,7 +621,7 @@ def _parse_tags(tags_value) -> List[str]:
     if not tags_value:
         return []
 
-    # yaml.safe_load already returns a list for [tag1, tag2]
+    # fast_safe_load already returns a list for [tag1, tag2]
     if isinstance(tags_value, list):
         return [str(t).strip() for t in tags_value if t]
 

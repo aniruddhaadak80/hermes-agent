@@ -71,7 +71,7 @@ def _is_bot_managed(profile_dir: Path) -> bool:
             return False
         import yaml
 
-        data = yaml.safe_load(raw)
+        data = fast_safe_load(raw)
         ui_meta = data.get("ui_meta") if isinstance(data, dict) else None
         return isinstance(ui_meta, dict) and isinstance(ui_meta.get("hermes-bots"), dict)
     except Exception:
@@ -138,7 +138,7 @@ def _profile_role(profile_dir: Path) -> str:
         raw = meta.read_text(encoding="utf-8", errors="replace")
         import yaml
 
-        data = yaml.safe_load(raw)
+        data = fast_safe_load(raw)
         if not isinstance(data, dict):
             return ""
         parts = []
@@ -183,7 +183,7 @@ def _peers(root: Path) -> list[str]:
             return []
         import yaml
 
-        data = yaml.safe_load(raw)
+        data = fast_safe_load(raw)
         peers = data.get("bot_peers") if isinstance(data, dict) else None
         if not isinstance(peers, dict):
             return []

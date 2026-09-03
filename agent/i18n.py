@@ -163,7 +163,7 @@ def _load_catalog(lang: str) -> dict[str, str]:
     try:
         import yaml  # PyYAML is already a hermes dependency
         with path.open("r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f) or {}
+            raw = fast_safe_load(f) or {}
     except Exception as exc:
         logger.warning("Failed to load i18n catalog %s: %s", path, exc)
         with _catalog_lock:

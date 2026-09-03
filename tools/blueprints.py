@@ -85,7 +85,7 @@ def _split_frontmatter(text: str) -> Optional[Dict[str, Any]]:
     try:
         import yaml
 
-        data = yaml.safe_load(fm_text)
+        data = fast_safe_load(fm_text)
     except Exception as e:  # pragma: no cover - malformed YAML
         logger.debug("blueprint: frontmatter YAML parse failed: %s", e)
         return None

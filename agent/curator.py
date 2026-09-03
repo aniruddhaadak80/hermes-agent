@@ -796,7 +796,7 @@ def _parse_structured_summary(
     # (config.yaml loader). Fall back to a hand parser for paranoia.
     try:
         import yaml  # type: ignore
-        data = yaml.safe_load(body)
+        data = fast_safe_load(body)
     except Exception:
         return empty
 
