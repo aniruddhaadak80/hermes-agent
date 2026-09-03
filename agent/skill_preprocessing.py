@@ -70,9 +70,11 @@ def run_inline_shell(command: str, cwd: Path | None, timeout: int) -> str:
     """
     _popen_kwargs = {"creationflags": windows_hide_flags()} if IS_WINDOWS else {}
     try:
+        from tools.environments.local import build_subprocess_env
         completed = subprocess.run(
             ["bash", "-c", command],
             cwd=str(cwd) if cwd else None,
+            env=build_subprocess_env(),
             capture_output=True,
             text=True, encoding='utf-8', errors='replace',
             timeout=max(1, int(timeout)),
