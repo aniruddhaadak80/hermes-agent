@@ -176,8 +176,9 @@ export function MemoryPressureBanner({
       <button
         type="button"
         aria-label={t.app.dismiss ?? "Dismiss"}
+        title={t.app.dismiss ?? "Dismiss"}
         onClick={dismiss}
-        className="shrink-0 opacity-70 hover:opacity-100"
+        className="shrink-0 rounded opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current/40"
       >
         <X className="h-3.5 w-3.5" />
       </button>
