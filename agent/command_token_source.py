@@ -41,6 +41,8 @@ import threading
 import time
 from typing import Callable, Optional
 
+from tools.environments.local import build_subprocess_env
+
 logger = logging.getLogger(__name__)
 
 # Treat a cached token as spent slightly before its stated expiry, so a request
@@ -72,6 +74,7 @@ def _mint(command: str, label: str) -> tuple[str, Optional[float]]:
             capture_output=True,
             text=True,
             timeout=_MINT_TIMEOUT_SECONDS,
+            env=build_subprocess_env(),
         )
     except subprocess.TimeoutExpired as exc:
         raise CommandTokenError(
