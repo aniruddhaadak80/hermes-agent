@@ -1,0 +1,3 @@
+## 2024-09-06 - MemoryPressureBanner Dismiss Button
+**Learning:** Found an accessibility issue pattern where icon-only buttons (like the MemoryPressureBanner dismiss button) were missing explicit keyboard focus states (`focus-visible`) and mouse tooltips (`title` attribute). This makes it harder for keyboard users to track focus and for mouse users to understand the action.
+**Action:** Always ensure icon-only buttons include `title` attributes that match their `aria-label` and `focus-visible` utility classes (e.g., `focus-visible:ring-1 focus-visible:outline-none`) to provide clear visual feedback during keyboard navigation.
