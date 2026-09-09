@@ -68,6 +68,7 @@ def run_inline_shell(command: str, cwd: Path | None, timeout: int) -> str:
     Failures return a short ``[inline-shell error: ...]`` marker instead of
     raising, so one bad snippet can't wreck the whole skill message.
     """
+    from tools.environments.local import build_subprocess_env
     _popen_kwargs = {"creationflags": windows_hide_flags()} if IS_WINDOWS else {}
     try:
         completed = subprocess.run(
@@ -78,6 +79,7 @@ def run_inline_shell(command: str, cwd: Path | None, timeout: int) -> str:
             timeout=max(1, int(timeout)),
             check=False,
             stdin=subprocess.DEVNULL,
+            env=build_subprocess_env(),
             **_popen_kwargs,
         )
     except subprocess.TimeoutExpired:
