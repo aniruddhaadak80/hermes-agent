@@ -311,7 +311,7 @@ jobs:
       - name: Upload HTML report
         # Advisory report — artifact-service blips must not fail the job.
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         id: ci-timings-html
         with:
           name: ci-timings-report
@@ -332,7 +332,7 @@ jobs:
       - name: Upload review status
         if: hashFiles('review-status.json') != ''
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
           name: review-status-ci-timings
           path: review-status.json
