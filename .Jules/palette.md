@@ -1,0 +1,3 @@
+## 2024-05-18 - Accessible Icon-Only Buttons in Custom Components
+**Learning:** Custom UI banners and alerts with inline icon-only action buttons (like a dismiss "X") are frequently overlooked for keyboard navigation and tooltips compared to standard Button components. Adding `aria-label` is not enough for fully sighted pointer users (who need `title` tooltips) or keyboard users (who need visible focus indicators).
+**Action:** When working on custom alerts/banners that use raw `<button>` elements instead of design system `Button` components, always explicitly add `title` (matching `aria-label`) and `focus-visible` utility classes (`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current rounded-sm`) to ensure complete accessibility.
