@@ -38,6 +38,7 @@ from typing import Any, Dict, Optional
 
 from hermes_constants import get_hermes_home
 from agent.secret_scope import get_secret as _get_secret
+from tools.environments.local import build_subprocess_env
 
 logger = logging.getLogger(__name__)
 
@@ -287,6 +288,7 @@ def _read_claude_code_credentials_from_keychain() -> Optional[Dict[str, Any]]:
             text=True, encoding='utf-8', errors='replace',
             timeout=5,
             stdin=subprocess.DEVNULL,
+            env=build_subprocess_env(),
         )
     except (OSError, subprocess.TimeoutExpired):
         logger.debug("Keychain: security command not available or timed out")
@@ -869,7 +871,7 @@ def run_oauth_setup_token() -> Optional[str]:
     # concern does not apply to an interactive login the user explicitly
     # invokes.  noqa: subprocess-stdin
     try:
-        subprocess.run([claude_path, "setup-token"])
+        subprocess.run([claude_path, "setup-token"], env=build_subprocess_env())
     except (KeyboardInterrupt, EOFError):
         return None
 
