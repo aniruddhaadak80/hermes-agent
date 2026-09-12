@@ -20,7 +20,7 @@ class TestFindMigrationScript:
 
     def test_finds_project_root_script(self, tmp_path):
         script = tmp_path / "openclaw_to_hermes.py"
-        script.write_text("# placeholder")
+        script.write_text("# placeholder", encoding="utf-8")
         with patch.object(claw_mod, "_OPENCLAW_SCRIPT", script):
             assert claw_mod._find_migration_script() == script
 
@@ -61,7 +61,7 @@ class TestScanWorkspaceState:
     """Test scanning for workspace state files."""
 
     def test_finds_root_state_files(self, tmp_path):
-        (tmp_path / "todo.json").write_text("{}")
+        (tmp_path / "todo.json").write_text("{}", encoding="utf-8")
         (tmp_path / "sessions").mkdir()
         findings = claw_mod._scan_workspace_state(tmp_path)
         descs = [desc for _, desc in findings]
@@ -74,7 +74,7 @@ class TestScanWorkspaceState:
         scan_dir.mkdir()
         hidden = scan_dir / ".git"
         hidden.mkdir()
-        (hidden / "todo.json").write_text("{}")
+        (hidden / "todo.json").write_text("{}", encoding="utf-8")
         findings = claw_mod._scan_workspace_state(scan_dir)
         assert len(findings) == 0
 
@@ -90,13 +90,13 @@ class TestArchiveDirectory:
     def test_renames_to_pre_migration(self, tmp_path):
         source = tmp_path / ".openclaw"
         source.mkdir()
-        (source / "test.txt").write_text("data")
+        (source / "test.txt").write_text("data", encoding="utf-8")
 
         archive_path = claw_mod._archive_directory(source)
         assert archive_path == tmp_path / ".openclaw.pre-migration"
         assert archive_path.is_dir()
         assert not source.exists()
-        assert (archive_path / "test.txt").read_text() == "data"
+        assert (archive_path / "test.txt").read_text(encoding="utf-8") == "data"
 
     def test_adds_timestamp_when_archive_exists(self, tmp_path):
         source = tmp_path / ".openclaw"
@@ -167,7 +167,7 @@ class TestCmdMigrate:
         openclaw_dir = tmp_path / ".openclaw"
         openclaw_dir.mkdir()
         config_path = tmp_path / "config.yaml"
-        config_path.write_text("")
+        config_path.write_text("", encoding="utf-8")
 
         args = Namespace(
             source=str(openclaw_dir),
@@ -286,7 +286,7 @@ class TestCmdCleanup:
         openclaw.mkdir()
         ws = openclaw / "workspace"
         ws.mkdir()
-        (ws / "todo.json").write_text("{}")
+        (ws / "todo.json").write_text("{}", encoding="utf-8")
 
         args = Namespace(source=None, dry_run=True, yes=False)
         with patch.object(claw_mod, "_find_openclaw_dirs", return_value=[openclaw]):
@@ -300,7 +300,7 @@ class TestCmdCleanup:
     def test_explicit_source(self, tmp_path, capsys):
         custom_dir = tmp_path / "my-openclaw"
         custom_dir.mkdir()
-        (custom_dir / "todo.json").write_text("{}")
+        (custom_dir / "todo.json").write_text("{}", encoding="utf-8")
 
         args = Namespace(source=str(custom_dir), dry_run=False, yes=True)
         claw_mod._cmd_cleanup(args)
@@ -350,23 +350,51 @@ class TestPrintMigrationReport:
 
 
 class TestDetectOpenclawProcesses:
-    def test_returns_match_when_pgrep_finds_openclaw(self):
-        """Validated pgrep hits are reported (POSIX scan helper directly,
-        so the assertion holds regardless of the host OS)."""
+    def test_reports_union_of_exact_and_node_matches(self):
+        with patch.object(claw_mod, "subprocess") as mock_subprocess:
+            mock_subprocess.run.side_effect = [
+                MagicMock(returncode=1, stdout=""),  # systemctl
+                MagicMock(returncode=0, stdout="1234\n"),  # pgrep -x openclaw
+                MagicMock(returncode=1, stdout=""),  # pgrep -x openclaw-gatewa
+                MagicMock(returncode=1, stdout=""),  # pgrep -x clawd
+                MagicMock(returncode=0, stdout="1234\n5678\n"),  # node cmdline probe
+            ]
+            mock_subprocess.TimeoutExpired = subprocess.TimeoutExpired
+            result = claw_mod._detect_openclaw_processes()
+        assert result == ["openclaw process(es) (PIDs: 1234, 5678)"]
 
-        def fake_run(cmd, **kwargs):
-            if cmd[0] == "pgrep":
-                return MagicMock(returncode=0, stdout="1234\n")
-            if cmd[0] == "ps":
-                return MagicMock(returncode=0, stdout="/usr/local/bin/openclaw gateway\n")
-            return MagicMock(returncode=1, stdout="")
+    @pytest.mark.linux_only
+    def test_live_pgrep_ignores_argv_mentions_but_finds_node_openclaw(self, tmp_path):
+        """A process that merely mentions "openclaw" in argv (the #12648 false positive) is not
+        OpenClaw; a node interpreter running an openclaw script is."""
+        import sys
+        import time
 
-        with patch.object(claw_mod.subprocess, "run", side_effect=fake_run), patch.object(
-            claw_mod.os, "getpid", return_value=999999
-        ):
-            result = claw_mod._posix_pgrep_openclaw_hits()
-        assert len(result) == 1
-        assert "1234" in result[0]
+        idle = f'{sys.executable} -c "import time; time.sleep(30)"'
+        # argv mentions openclaw but the binary is not one.
+        bystander = subprocess.Popen(["bash", "-c", f"exec {idle} {tmp_path}/openclaw-notes.txt"])
+        # argv[0] renamed to ``node`` running an openclaw script: the real launch shape.
+        node_like = subprocess.Popen(["bash", "-c", f"exec -a node {idle} {tmp_path}/openclaw/entry.js"])
+        # The gateway sets process.title="openclaw-gateway" (comm truncates to 15 chars); a
+        # copied interpreter with that file name yields the same comm.
+        import shutil
+        titled_bin = tmp_path / "openclaw-gateway"
+        shutil.copy2(sys.executable, titled_bin)
+        titled = subprocess.Popen([str(titled_bin), "-c", "import time; time.sleep(30)"])
+        try:
+            time.sleep(0.3)
+            with patch.object(claw_mod, "_posix_probe", wraps=claw_mod._posix_probe) as probe:
+                result = claw_mod._detect_openclaw_processes()
+            assert not any(a[0][:2] == ["pgrep", "-f"] and a[0][2] == "openclaw" for a, _ in probe.call_args_list)
+            assert len(result) == 1
+            pids = result[0].split("PIDs: ")[1].rstrip(")").split(", ")
+            assert str(node_like.pid) in pids
+            assert str(titled.pid) in pids
+            assert str(bystander.pid) not in pids
+        finally:
+            for proc in (bystander, node_like, titled):
+                proc.kill()
+                proc.wait()
 
 
     @pytest.mark.windows_only
@@ -402,107 +430,3 @@ class TestWarnIfOpenclawRunning:
         assert "OpenClaw appears to be running" in captured.out
 
 
-
-
-class TestLooksLikeOpenclawCommand:
-    def test_real_executable_basenames(self):
-        assert claw_mod._looks_like_openclaw_command("openclaw gateway --port 1") is True
-        assert claw_mod._looks_like_openclaw_command("/usr/local/bin/openclaw") is True
-        assert claw_mod._looks_like_openclaw_command("openclaw-gateway serve") is True
-        assert claw_mod._looks_like_openclaw_command("clawd --daemon") is True
-
-    def test_node_hosted_installs_detected(self):
-        assert (
-            claw_mod._looks_like_openclaw_command(
-                "node /home/u/.openclaw/gateway.js"
-            )
-            is True
-        )
-        assert (
-            claw_mod._looks_like_openclaw_command(
-                "node /srv/app/node_modules/openclaw/dist/index.js"
-            )
-            is True
-        )
-        assert (
-            claw_mod._looks_like_openclaw_command(
-                "node server.js --config /home/u/.clawdbot/config.yaml"
-            )
-            is True
-        )
-
-    def test_incidental_mentions_rejected(self):
-        # An editor with an openclaw-ish path, a grep over docs, and this
-        # migration's own skill path are NOT running gateways.
-        assert (
-            claw_mod._looks_like_openclaw_command(
-                "vim /home/u/openclaw-notes/a.md"
-            )
-            is False
-        )
-        assert claw_mod._looks_like_openclaw_command("grep openclaw notes.txt") is False
-        assert (
-            claw_mod._looks_like_openclaw_command("hermes claw cleanup") is False
-        )
-        assert (
-            claw_mod._looks_like_openclaw_command("python skills/openclaw-migration/openclaw_to_hermes.py")
-            is False
-        )
-        assert claw_mod._looks_like_openclaw_command("") is False
-
-
-class TestPgrepHitsValidated:
-    """pgrep -f hits must be filtered to validated OpenClaw commands."""
-
-    def test_unrelated_cmdline_not_reported(self):
-        pgrep_result = MagicMock(returncode=0, stdout="111 222\n")
-
-        def fake_run(cmd, **kwargs):
-            if cmd[0] == "pgrep":
-                return pgrep_result
-            if cmd[0] == "ps":
-                pid = cmd[cmd.index("-p") + 1]
-                lines = {
-                    "111": "vim /home/u/openclaw-notes/x.md\n",
-                    "222": "/usr/local/bin/openclaw gateway\n",
-                }
-                return MagicMock(returncode=0, stdout=lines.get(pid, ""))
-            return MagicMock(returncode=1, stdout="")
-
-        with patch.object(claw_mod.subprocess, "run", side_effect=fake_run), patch.object(
-            claw_mod.os, "getpid", return_value=999999
-        ):
-            found = claw_mod._posix_pgrep_openclaw_hits()
-        joined = "\n".join(found)
-        assert "111" not in joined, "unrelated process flagged as OpenClaw"
-        assert any("222" in f for f in found), "real openclaw process lost"
-
-    def test_self_pid_excluded(self):
-        me = claw_mod.os.getpid()
-        pgrep_result = MagicMock(returncode=0, stdout=f"{me}\n")
-
-        def fake_run(cmd, **kwargs):
-            if cmd[0] == "pgrep":
-                return pgrep_result
-            if cmd[0] == "ps":
-                return MagicMock(returncode=0, stdout="openclaw serve\n")
-            return MagicMock(returncode=1, stdout="")
-
-        with patch.object(claw_mod.subprocess, "run", side_effect=fake_run):
-            found = claw_mod._posix_pgrep_openclaw_hits()
-        assert found == []
-
-    def test_all_hits_invalid_means_no_detection(self):
-        pgrep_result = MagicMock(returncode=0, stdout="300 301 302\n")
-
-        def fake_run(cmd, **kwargs):
-            if cmd[0] == "pgrep":
-                return pgrep_result
-            if cmd[0] == "ps":
-                return MagicMock(returncode=0, stdout="tail -f /var/log/syslog\n")
-            return MagicMock(returncode=1, stdout="")
-
-        with patch.object(claw_mod.subprocess, "run", side_effect=fake_run), patch.object(
-            claw_mod.os, "getpid", return_value=1
-        ):
-            assert claw_mod._posix_pgrep_openclaw_hits() == []

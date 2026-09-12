@@ -3,7 +3,6 @@
 import importlib.util
 import itertools
 import logging
-import os
 import subprocess
 import sys
 from datetime import datetime
@@ -27,93 +26,9 @@ _OPENCLAW_SCRIPT_INSTALLED = get_hermes_home() / "skills" / _SCRIPT_REL
 
 # Known OpenClaw directory names (current + legacy)
 _OPENCLAW_DIR_NAMES = (".openclaw", ".clawdbot", ".moltbot")
+# pgrep -f ERE anchored on a node interpreter as argv[0] (``node /usr/local/bin/openclaw gateway``).
+_OPENCLAW_NODE_CMDLINE_RE = r"^(\S*/)?node(js)?\s.*(openclaw|clawd)"
 
-# Executable basenames that identify a real OpenClaw runtime process.
-_OPENCLAW_EXECUTABLE_NAMES = ("openclaw", "clawd")
-
-# Path fragments identifying a Node-hosted OpenClaw install when they
-# appear in a process argument (install dir or package path, current +
-# legacy names).
-_OPENCLAW_PATH_MARKERS = (
-    ".openclaw/",
-    ".openclaw\\",
-    ".clawdbot/",
-    ".clawdbot\\",
-    ".moltbot/",
-    ".moltbot\\",
-    "node_modules/openclaw",
-    "node_modules/clawd",
-)
-
-
-def _looks_like_openclaw_command(cmdline: str) -> bool:
-    """Validate that a process command line is an actual OpenClaw runtime.
-
-    ``pgrep -f openclaw`` matches every process whose full argv merely
-    mentions the string (an editor with an ``openclaw-notes`` path open,
-    a grep over docs, this very migration's script paths). A match only
-    counts as a running gateway when the executable itself is OpenClaw
-    (basename ``openclaw*``/``clawd``) or when some argument points into
-    an OpenClaw install (known dot-dirs / node_modules layout) — which
-    keeps Node.js-hosted launches detected.
-    """
-    if not cmdline or not cmdline.strip():
-        return False
-    parts = cmdline.strip().split()
-    exe = os.path.basename(parts[0]).lower()
-    if exe in _OPENCLAW_EXECUTABLE_NAMES or exe.startswith(
-        ("openclaw-", "clawd-")
-    ):
-        return True
-    lowered = cmdline.lower()
-    return any(marker in lowered for marker in _OPENCLAW_PATH_MARKERS)
-
-
-def _validated_openclaw_pids(pids: list[str]) -> list[str]:
-    """Filter pgrep hits down to processes whose command validates as OpenClaw.
-
-    Unknown/unreadable commands are dropped (fail toward fewer false
-    positives). Our own PID is always excluded.
-    """
-    me = str(os.getpid())
-    validated: list[str] = []
-    for pid in pids:
-        if pid == me:
-            continue
-        try:
-            result = subprocess.run(
-                ["ps", "-p", pid, "-o", "args="],
-                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            continue
-        cmdline = (result.stdout or "").strip()
-        if cmdline and _looks_like_openclaw_command(cmdline):
-            validated.append(pid)
-    return validated
-
-def _posix_pgrep_openclaw_hits() -> list[str]:
-    """POSIX process scan: pgrep hits validated against real commands.
-
-    Split out from :func:`_detect_openclaw_processes` so the pgrep path is
-    testable without faking the host OS.
-    """
-    try:
-        result = subprocess.run(
-            ["pgrep", "-f", "openclaw"],
-            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=3,
-        )
-        if result.returncode == 0:
-            pids = result.stdout.strip().split()
-            # pgrep -f matches the bare substring anywhere in any command
-            # line (editors, greps, this migration's own paths). Validate
-            # each hit's real command before claiming a running OpenClaw.
-            pids = _validated_openclaw_pids(pids)
-            if pids:
-                return [f"openclaw process(es) (PIDs: {', '.join(pids)})"]
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-    return []
 # `hermes claw migrate` flags/defaults. Secrets are never included implicitly: --migrate-secrets
 # is required even under --preset full (OpenClaw's two-phase posture); no silent API-key import.
 _MIGRATE_ARG_DEFAULTS = (
@@ -141,7 +56,7 @@ def _print_banner(title: str) -> None:
     """Print the magenta boxed banner shared by the claw subcommands."""
     print()
     rule = "─" * 57
-    for line in (f"┌{rule}┐", f"│          ⚕ Hermes — {title:<35s}│", f"└{rule}┘"):
+    for line in (f"┌{rule}┐", f"│          ☤ Hermes — {title:<35s}│", f"└{rule}┘"):
         print(color(line, Colors.MAGENTA))
 
 
@@ -211,10 +126,19 @@ def _detect_openclaw_processes() -> list[str]:
     result = _posix_probe(["systemctl", "--user", "is-active", "openclaw-gateway.service"], 5)
     if result is not None and result.stdout.strip() == "active":
         found.append("systemd service: openclaw-gateway.service")
-    # pgrep -f matches the bare substring anywhere in any command line
-    # (editors, greps, migration script paths) — validate each hit's real
-    # command before claiming a running OpenClaw.
-    found.extend(_posix_pgrep_openclaw_hits())
+    # Never a bare ``pgrep -f openclaw``: it matches ANY argv containing the word (an editor on
+    # ~/.openclaw/config.json, ``tail -f openclaw.log``) and aborted cleanup on idle hosts (#12648).
+    # Mirror the Windows branch: exact binary names, plus node processes whose script mentions it.
+    pids: list[str] = []
+    # ``-x`` matches the 15-char comm: the gateway sets process.title="openclaw-gateway", which
+    # the kernel truncates to "openclaw-gatewa".
+    for probe in (["pgrep", "-x", "openclaw"], ["pgrep", "-x", "openclaw-gatewa"], ["pgrep", "-x", "clawd"],
+                  ["pgrep", "-f", _OPENCLAW_NODE_CMDLINE_RE]):
+        result = _posix_probe(probe, 3)
+        if result is not None and result.returncode == 0:
+            pids.extend(result.stdout.split())
+    if pids:
+        found.append(f"openclaw process(es) (PIDs: {', '.join(dict.fromkeys(pids))})")
     return found
 
 
