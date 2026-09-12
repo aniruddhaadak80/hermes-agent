@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from agent.verify.recipes import Recipe
+from tools.environments.local import build_subprocess_env
 
 DEFAULT_PHASE_TIMEOUT = 600.0
 DEFAULT_READY_TIMEOUT = 60.0
@@ -113,6 +114,7 @@ def _run_phase_command(
             command,
             shell=True,  # project-authored commands; see module docstring
             cwd=str(root),
+            env=build_subprocess_env(),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             timeout=timeout,
@@ -213,6 +215,7 @@ def _run_start_phase(
         recipe.start,
         shell=True,  # project-authored command; see module docstring
         cwd=str(root),
+        env=build_subprocess_env(),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         start_new_session=True,  # own process group for clean teardown
