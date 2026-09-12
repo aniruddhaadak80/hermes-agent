@@ -2,20 +2,10 @@
 
 import json
 import logging
+import os
 import time
-from contextlib import contextmanager
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List
-
-try:
-    import fcntl
-except ImportError:  # pragma: no cover - platform-dependent
-    fcntl = None
-try:
-    import msvcrt
-except ImportError:  # pragma: no cover - platform-dependent
-    msvcrt = None
 
 logger = logging.getLogger(__name__)
 
@@ -35,78 +25,76 @@ def has_incomplete_scratchpad(content: str) -> bool:
     return bool(content) and "<REASONING_SCRATCHPAD>" in content and "</REASONING_SCRATCHPAD>" not in content
 
 
-@contextmanager
-def _trajectory_lock(filename: str):
-    """Cross-process advisory lock around one JSONL append.
+def _lock_append_handle(f, acquire: bool, timeout: float | None = None) -> None:
+    """Exclusive whole-file lock on an append handle: ``flock`` on POSIX, a 1-byte
+    ``msvcrt.locking`` range at offset 0 on Windows (append position is restored by the OS).
 
-    Same shape as the auth.json lock in ``hermes_cli/auth.py``: a sidecar
-    ``<filename>.lock`` file held via ``fcntl.flock`` (POSIX) or
-    ``msvcrt.locking`` (Windows, which requires the lock file to be
-    populated with the pointer at offset 0). Raises ``TimeoutError``
-    fail-closed when the lock cannot be acquired — an unserialized append
-    can interleave two writers' JSON lines and corrupt the file, so a
-    dropped sample is strictly better than a torn write.
+    With ``timeout`` set, acquisition retries non-blocking until the deadline and
+    raises ``TimeoutError`` instead of blocking forever, so a stalled holder costs
+    one dropped sample instead of a hung batch worker.
     """
-    if fcntl is None and msvcrt is None:  # pragma: no cover - rare platform
-        yield
+    if not acquire:
+        if os.name == "nt":
+            import msvcrt
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+            f.seek(0, os.SEEK_END)
+        else:
+            import fcntl
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         return
-
-    lock_path = Path(str(filename) + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # On Windows, msvcrt.locking needs the file to have content and the
-    # file pointer at position 0. Ensure the lock file has at least 1 byte.
-    if msvcrt and (not lock_path.exists() or lock_path.stat().st_size == 0):
-        lock_path.write_text(" ", encoding="utf-8")
-
-    with lock_path.open("r+" if msvcrt else "a+", encoding="utf-8") as lock_file:
-        deadline = time.monotonic() + TRAJECTORY_LOCK_TIMEOUT_SECONDS
-        while True:
-            try:
-                if fcntl:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                else:
-                    lock_file.seek(0)
-                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
-                break
-            except (BlockingIOError, OSError, PermissionError):
-                if time.monotonic() >= deadline:
-                    raise TimeoutError(
-                        f"trajectory lock not acquired within "
-                        f"{TRAJECTORY_LOCK_TIMEOUT_SECONDS}s: {lock_path}"
-                    )
-                time.sleep(0.05)
+    if timeout is None:
+        if os.name == "nt":
+            import msvcrt
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+            f.seek(0, os.SEEK_END)
+        else:
+            import fcntl
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        return
+    deadline = time.monotonic() + timeout
+    while True:
         try:
-            yield
-        finally:
-            if fcntl:
-                try:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-                except (OSError, IOError):
-                    pass
-            elif msvcrt:
-                try:
-                    lock_file.seek(0)
-                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
-                except (OSError, IOError):
-                    pass
+            if os.name == "nt":
+                import msvcrt
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                f.seek(0, os.SEEK_END)
+            else:
+                import fcntl
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except OSError:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"trajectory lock not acquired within {timeout}s: {f.name}")
+            time.sleep(0.05)
 
 
 def save_trajectory(trajectory: List[Dict[str, Any]], model: str, completed: bool, filename: str = None):
     """Append a ShareGPT-format entry to a JSONL file (default trajectory_samples.jsonl / failed_trajectories.jsonl by ``completed``).
 
-    Appends are serialized across processes with an advisory sidecar lock;
-    if the lock cannot be acquired within
+    Appends are serialized across processes with an advisory lock on the file
+    handle (whole-file ``flock`` on POSIX, 1-byte ``msvcrt.locking`` range on
+    Windows); if the lock cannot be acquired within
     :data:`TRAJECTORY_LOCK_TIMEOUT_SECONDS` the save is skipped (logged)
-    rather than written unserialized.
+    rather than stalling the writer or landing unserialized (#12684).
     """
     if filename is None:
         filename = "trajectory_samples.jsonl" if completed else "failed_trajectories.jsonl"
     entry = {"conversations": trajectory, "timestamp": datetime.now().isoformat(), "model": model, "completed": completed}
     try:
-        with _trajectory_lock(filename):
-            with open(filename, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        line = json.dumps(entry, ensure_ascii=False) + "\n"  # serialize before taking the lock
+        with open(filename, "a", encoding="utf-8") as f:
+            # Gateway sessions and batch workers append to the SAME default file; without an
+            # exclusive lock around write+flush, entries larger than one write() interleave and the
+            # JSONL stops parsing (#12684).
+            _lock_append_handle(f, True, timeout=TRAJECTORY_LOCK_TIMEOUT_SECONDS)
+            try:
+                f.write(line)
+                f.flush()
+            finally:
+                _lock_append_handle(f, False)
         logger.info("Trajectory saved to %s", filename)
     except TimeoutError as e:
         logger.warning("Trajectory not saved (lock contention): %s", e)

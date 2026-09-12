@@ -35,14 +35,10 @@ def test_save_appends_valid_jsonl(traj_file):
 def test_lock_timeout_skips_write_fail_closed(traj_file, monkeypatch):
     """A lock that can never be acquired must NOT fall through to a write."""
 
-    class _AlwaysBusy:
-        def __enter__(self):
-            raise TimeoutError("simulated contention")
+    def _always_busy(*args, **kwargs):
+        raise TimeoutError("simulated contention")
 
-        def __exit__(self, *exc):
-            return False
-
-    monkeypatch.setattr(trajectory, "_trajectory_lock", lambda f: _AlwaysBusy())
+    monkeypatch.setattr(trajectory, "_lock_append_handle", _always_busy)
     trajectory.save_trajectory(
         [{"from": "human", "value": "hi"}], "m", completed=True,
         filename=str(traj_file),
@@ -50,10 +46,10 @@ def test_lock_timeout_skips_write_fail_closed(traj_file, monkeypatch):
     assert not traj_file.exists(), "write happened despite lock failure"
 
 
-def test_sidecar_lock_created_next_to_output(traj_file):
+def test_no_sidecar_lock_file_created(traj_file):
+    """The lock lives on the append handle itself — no ``.lock`` litter."""
     trajectory.save_trajectory([], "m", completed=True, filename=str(traj_file))
-    lock_path = Path(str(traj_file) + ".lock")
-    assert lock_path.exists()
+    assert not Path(str(traj_file) + ".lock").exists()
 
 
 def _wait_for(path, timeout_steps=1000):
@@ -66,9 +62,6 @@ def _wait_for(path, timeout_steps=1000):
 
 def test_lock_excludes_another_process(tmp_path):
     """Real cross-process exclusion, modeled on the cron jobs.json lock test."""
-    if trajectory.fcntl is None and trajectory.msvcrt is None:
-        pytest.skip("no advisory locking primitive on this platform")
-
     traj_file = tmp_path / "trajectory_samples.jsonl"
     ready = tmp_path / "ready"
     release = tmp_path / "release"
@@ -83,12 +76,16 @@ def test_lock_excludes_another_process(tmp_path):
             sys.path.insert(0, {repo_root!r})
             from agent import trajectory
 
-            with trajectory._trajectory_lock({str(traj_file)!r}):
-                open({str(ready)!r}, "w").write("1")
-                for _ in range(1000):
-                    if os.path.exists({str(release)!r}):
-                        break
-                    time.sleep(0.01)
+            f = open({str(traj_file)!r}, "a")
+            trajectory._lock_append_handle(f, True)
+            f.write(" ")
+            f.flush()
+            open({str(ready)!r}, "w").write("1")
+            for _ in range(1000):
+                if os.path.exists({str(release)!r}):
+                    break
+                time.sleep(0.01)
+            trajectory._lock_append_handle(f, False)
             """
         )
     )
@@ -101,8 +98,10 @@ def test_lock_excludes_another_process(tmp_path):
             sys.path.insert(0, {repo_root!r})
             from agent import trajectory
 
-            with trajectory._trajectory_lock({str(traj_file)!r}):
-                open({str(blocker_acquired)!r}, "w").write("1")
+            f = open({str(traj_file)!r}, "a")
+            trajectory._lock_append_handle(f, True)
+            open({str(blocker_acquired)!r}, "w").write("1")
+            trajectory._lock_append_handle(f, False)
             """
         )
     )
@@ -112,25 +111,26 @@ def test_lock_excludes_another_process(tmp_path):
         assert _wait_for(ready), "child never acquired the trajectory lock"
         assert child.poll() is None, "holder process exited early"
 
-        # While the holder owns the sidecar, this process must be unable to
+        # While the holder owns the file lock, this process must be unable to
         # take the same kernel-level lock (proves it is not just in-process).
-        lock_path = str(traj_file) + ".lock"
-        if trajectory.fcntl is not None:
-            fd = os.open(lock_path, os.O_RDWR | os.O_CREAT)
-            try:
-                with pytest.raises(OSError):
-                    trajectory.fcntl.flock(fd, trajectory.fcntl.LOCK_EX | trajectory.fcntl.LOCK_NB)
-            finally:
-                os.close(fd)
-        else:
-            with open(lock_path, "r+", encoding="utf-8") as lf:
+        if os.name == "nt":
+            import msvcrt
+
+            with open(str(traj_file), "r+b") as lf:
                 lf.seek(0)
                 with pytest.raises(OSError):
-                    trajectory.msvcrt.locking(lf.fileno(), trajectory.msvcrt.LK_NBLCK, 1)
+                    msvcrt.locking(lf.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fd = os.open(str(traj_file), os.O_RDWR | os.O_CREAT)
+            try:
+                with pytest.raises(OSError):
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            finally:
+                os.close(fd)
 
         # A second process must still be waiting while the lock is held.
-        release.touch()  # keep held until we're ready below
-        release.unlink()
         blocker_child = subprocess.Popen([sys.executable, str(blocker)])
         try:
             import time as t
