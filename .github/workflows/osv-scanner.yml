@@ -132,7 +132,7 @@ jobs:
       - name: Upload review status artifact
         if: always() && steps.emit.outcome != 'skipped'
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@4b4a1f6a1df8a1bc13e007823b1238eb8c47b19a # v4.4.2
         with:
           name: review-status-osv-scanner
           path: review-status.json

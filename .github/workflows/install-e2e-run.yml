@@ -149,7 +149,7 @@ jobs:
       # tripped when a real install breaks.
       - name: Upload installer logs
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@4b4a1f6a1df8a1bc13e007823b1238eb8c47b19a # v4.4.2
         with:
           # Unique per leg: a matrix over releases runs this workflow several
           # times per route, and same-named artifacts collide.
