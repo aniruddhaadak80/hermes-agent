@@ -956,3 +956,53 @@ def test_human_reply_unaffected_by_bots_require_mention():
         gated._should_process_message(_group_message("replying", reply_to_bot=True))
         is True
     )
+
+
+def test_suppressed_bot_wake_word_is_observed_not_dropped():
+    """A pattern-matching message from another bot is never dispatched (loop
+    safety) but must still be captured as observed context — otherwise it is
+    lost from both paths silently (#115119)."""
+    gated = _make_adapter(
+        require_mention=True,
+        bots_require_mention=True,
+        observe_unmentioned_group_messages=True,
+        allowed_chats=["-100"],
+        group_allowed_chats=["-100"],
+        mention_patterns=[r"\bhermes_bot\b"],
+    )
+    message = _bot_sender_message("hey hermes_bot, what is the deploy status?")
+
+    assert gated._should_process_message(message) is False
+    assert gated._should_observe_unmentioned_group_message(message) is True
+
+
+def test_bot_chatter_observe_contract_unchanged():
+    """Non-matching bot messages stay observed; human pattern matches still
+    dispatch (and are therefore not observed); without the loop breaker the
+    old routing is untouched."""
+    gated = _make_adapter(
+        require_mention=True,
+        bots_require_mention=True,
+        observe_unmentioned_group_messages=True,
+        allowed_chats=["-100"],
+        group_allowed_chats=["-100"],
+        mention_patterns=[r"\bhermes_bot\b"],
+    )
+    plain_bot = _bot_sender_message("routine heartbeat")
+    assert gated._should_process_message(plain_bot) is False
+    assert gated._should_observe_unmentioned_group_message(plain_bot) is True
+
+    human_match = _group_message("hey hermes_bot, what is the deploy status?")
+    assert gated._should_process_message(human_match) is True
+    assert gated._should_observe_unmentioned_group_message(human_match) is False
+
+    unguarded = _make_adapter(
+        require_mention=True,
+        observe_unmentioned_group_messages=True,
+        allowed_chats=["-100"],
+        group_allowed_chats=["-100"],
+        mention_patterns=[r"\bhermes_bot\b"],
+    )
+    bot_match = _bot_sender_message("hey hermes_bot, what is the deploy status?")
+    assert unguarded._should_process_message(bot_match) is True
+    assert unguarded._should_observe_unmentioned_group_message(bot_match) is False

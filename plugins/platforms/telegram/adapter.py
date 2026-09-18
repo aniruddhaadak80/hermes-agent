@@ -5702,7 +5702,14 @@ class TelegramAdapter(BasePlatformAdapter):
             return False
         if not self._telegram_require_mention() or self._is_reply_to_bot(message) or self._message_mentions_bot(message):
             return False
-        return not self._message_matches_mention_patterns(message)
+        # ...except messages the bot-sender loop breaker suppressed: a
+        # pattern-matching message from another bot is never dispatched, so
+        # excluding it here drops it from both paths silently. Observing it
+        # is loop-safe (the breaker still owns dispatch) and matches any
+        # other unaddressed group message.
+        if self._message_matches_mention_patterns(message):
+            return self._sender_is_other_bot(message) and self._telegram_bots_require_mention()
+        return True
 
     def _telegram_group_observe_shared_source(self, source):
         """Return a chat/topic-scoped source for observed Telegram group context."""
