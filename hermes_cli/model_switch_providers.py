@@ -1308,11 +1308,24 @@ def list_authenticated_providers(
     if custom_providers and isinstance(custom_providers, list):
         _lap_custom_provider_rows(b, custom_providers)
 
-    return _finalize_picker_rows(b.results, user_providers, current_model)
+    return _finalize_picker_rows(b.results, user_providers, current_model, excluded_providers=excluded_providers)
 
 
-def _finalize_picker_rows(results: list, user_providers, current_model: str) -> list:
+def _finalize_picker_rows(results: list, user_providers, current_model: str, excluded_providers=None) -> list:
     """Post-passes: drop ``providers.<name>.enabled: false`` rows, inject the current model, sort."""
+    # Normalize exclusion keys by stripping a leading ``custom:`` so a slug/provider_id that
+    # surfaces as ``custom:foo`` still matches an excluded ``foo`` (and vice versa).
+    _excluded = {str(p).strip().lower() for p in (excluded_providers or []) if p}
+    def _norm_excl_key(v):
+        v = str(v).strip().lower()
+        if v.startswith("custom:"):
+            v = v[len("custom:"):]
+        return v
+    _excluded_norm = {_norm_excl_key(p) for p in _excluded}
+    if _excluded_norm:
+        results = [r for r in results
+                   if _norm_excl_key(r.get("slug", "")) not in _excluded_norm
+                   and _norm_excl_key(r.get("provider_id", "")) not in _excluded_norm]
     # The enabled post-filter covers built-in rows (sections 1-2) that bypass the per-section
     # gate; matched by slug and ``provider_id``.
     try:
