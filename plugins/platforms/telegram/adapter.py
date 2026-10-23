@@ -6654,8 +6654,15 @@ class TelegramAdapter(TelegramHeldInboundMixin, TelegramTopicRoutingMixin, BaseP
         if existing is None:
             pending[key] = event
             return
+        # keep media_text_inlined aligned with media_urls/media_types, padding
+        # any missing flags with None so zip-style consumers stay in sync
+        existing_flags = list(getattr(existing, "media_text_inlined", []) or [])
+        existing.media_text_inlined = existing_flags + [None] * (len(existing.media_urls) - len(existing_flags))
+        incoming_flags = list(getattr(event, "media_text_inlined", []) or [])
+        incoming_flags = incoming_flags + [None] * (len(event.media_urls) - len(incoming_flags))
         existing.media_urls.extend(event.media_urls)
         existing.media_types.extend(event.media_types)
+        existing.media_text_inlined.extend(incoming_flags)
         if event.text:
             existing.text = self._merge_caption(existing.text, event.text)
 
