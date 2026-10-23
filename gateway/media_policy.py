@@ -22,6 +22,24 @@ _FLAG_ENVS = (("strict", "HERMES_MEDIA_DELIVERY_STRICT"), ("trust_recent_files",
 _ALLOW_DIRS_ENV = "HERMES_MEDIA_ALLOW_DIRS"
 _TRUST_RECENT_SECONDS_ENV = "HERMES_MEDIA_TRUST_RECENT_SECONDS"
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
+_UNSET = object()
+
+def _flag_value(value: Any, default: bool = False) -> bool:
+    """Coerce a config/env flag to bool, handling quoted "false"/"true" strings."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("", "0", "false", "no", "off"):
+            return False
+        if v in ("1", "true", "yes", "on"):
+            return True
+    try:
+        return bool(value)
+    except Exception:
+        return default
 
 
 def _routed_gateway_cfg() -> Optional[dict[str, Any]]:
@@ -42,7 +60,7 @@ def _routed_gateway_cfg() -> Optional[dict[str, Any]]:
 def media_delivery_strict() -> bool:
     cfg = _routed_gateway_cfg()
     if cfg is not None:
-        return bool(cfg.get("strict", False))
+        return _flag_value(cfg.get("strict", False), default=False)
     return os.environ.get(_FLAG_ENVS[0][1], "0").strip().lower() in _TRUTHY
 
 
@@ -57,7 +75,7 @@ def media_delivery_allow_dirs() -> str:
 def media_delivery_trust_recent() -> bool:
     cfg = _routed_gateway_cfg()
     if cfg is not None:
-        return bool(cfg.get("trust_recent_files", True))
+        return _flag_value(cfg.get("trust_recent_files", True), default=True)
     return os.environ.get(_FLAG_ENVS[1][1], "1").strip().lower() not in ("0", "false", "no", "off", "")
 
 
@@ -110,9 +128,12 @@ def apply_media_policy_env(config: Optional[dict[str, Any]] = None) -> None:
         if not gateway_cfg:
             return
         for key, env in _FLAG_ENVS:
-            flag = gateway_cfg.get(key)
-            if flag is not None:
-                _set_env_default(env, "1" if flag else "0")
+            raw = gateway_cfg.get(key, _UNSET)
+            if raw is _UNSET:
+                continue
+            default = key == "trust_recent_files"
+            flag = _flag_value(raw, default=default)
+            _set_env_default(env, "1" if flag else "0")
         allow_dirs = gateway_cfg.get("media_delivery_allow_dirs")
         if allow_dirs:
             _set_env_default(_ALLOW_DIRS_ENV, _allow_dirs_str(allow_dirs))
