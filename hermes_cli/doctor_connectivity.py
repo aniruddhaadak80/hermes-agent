@@ -162,7 +162,14 @@ def _probe_anthropic() -> ProbeResult:
         is_oauth = _is_oauth_token(key)
         headers = {"anthropic-version": "2023-06-01", **({"Authorization": f"Bearer {key}", "anthropic-beta": ",".join(_COMMON_BETAS + _OAUTH_ONLY_BETAS)}
                                                          if is_oauth else {"x-api-key": key})}
-        url = "https://api.anthropic.com/v1/models"
+        _base = os.getenv("ANTHROPIC_BASE_URL", "").strip()
+        if _base:
+            _root = _base.rstrip("/")
+            if not _root.endswith("/v1"):
+                _root = _root + "/v1"
+            url = _root + "/models"
+        else:
+            url = "https://api.anthropic.com/v1/models"
         r = httpx.get(url, headers=headers, timeout=10)
         # OAuth subscriptions without 1M context reject with 400 "long context beta is not yet available";
         # retry once with that beta stripped so doctor doesn't falsely report Anthropic as unreachable.
