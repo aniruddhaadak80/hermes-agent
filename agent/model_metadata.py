@@ -885,9 +885,16 @@ def _extract_pricing(payload: dict[str, Any]) -> dict[str, Any]:
         pricing: dict[str, Any] = {}
         for target, aliases in alias_map.items():
             for alias in aliases:
-                if alias in normalized and normalized[alias] not in {None, ""}:
-                    pricing[target] = normalized[alias]
-                    break
+                if alias not in normalized:
+                    continue
+                value = normalized[alias]
+                # A list-valued modality (e.g. "input": ["text", "image"]) is not a
+                # price: skip non-scalars instead of hashing them into the set test
+                # (#158208), and never surface them as a token rate.
+                if isinstance(value, bool) or not isinstance(value, (str, int, float)) or value == "":
+                    continue
+                pricing[target] = value
+                break
         if pricing:
             return _normalize_token_rates(pricing, normalized.get("unit"))
     return {}
