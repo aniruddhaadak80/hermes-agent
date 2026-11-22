@@ -17,6 +17,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 from urllib.parse import urlparse
+from hermes_constants import hermes_home_key
 from utils import atomic_json_write
 
 logger = logging.getLogger(__name__)
@@ -89,7 +90,9 @@ class SearchMemo:
 
     @staticmethod
     def _key(provider: str, query: str, limit: int) -> tuple:
-        return (provider, normalize_query(query), bucket_limit(limit))
+        # One process serves several profiles on a multiplexed gateway: a memo hit
+        # must not carry another profile's credentials-backed result (#158297).
+        return (hermes_home_key(), provider, normalize_query(query), bucket_limit(limit))
 
     def lookup(self, provider: str, query: str, limit: int) -> Optional[dict]:
         if not cache_enabled():
