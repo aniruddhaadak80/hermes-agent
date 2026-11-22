@@ -1651,7 +1651,10 @@ def _cron_tick_profile_homes(config: object) -> list[tuple[str, Path]]:
     if any(name == active for name, _home in homes):
         return homes
     try:
-        return homes + [(active, get_profile_dir(active))]
+        # "custom" means HERMES_HOME sits outside profiles/: the gateway's own home
+        # is the one to tick and probe, not the nonexistent profiles/custom (#158256).
+        active_home = get_hermes_home() if active == "custom" else get_profile_dir(active)
+        return homes + [(active, active_home)]
     except Exception:
         return homes
 
