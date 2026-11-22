@@ -27,6 +27,16 @@ from hermes_cli._subprocess_compat import (
 from hermes_cli.sqlite_safe_read import LiveConnectionError, offline_file_access
 from hermes_cli.sizefmt import format_bytes
 
+# Footers the @-reference expander appends below the typed text. Anything reading
+# only the user's own words must drop them (#158111).
+CONTEXT_FOOTER_RE = re.compile(r"\n+--- (?:Context Warnings|Attached Context) ---\n.*", re.DOTALL)
+
+
+def strip_context_footers(text: str) -> str:
+    """Remove the expander's warnings/attached-context footers from *text*."""
+    return CONTEXT_FOOTER_RE.sub("", text)
+
+
 # ── Plugin context-reference provider API ────────────────────────────────────
 
 # --------------------------------------------------------------------------- Plugin context-reference

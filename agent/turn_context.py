@@ -841,6 +841,10 @@ def _emit_reaction(agent: Any, original_user_message: Any, display_kind: Optiona
         if describe_skill_invocation(original_user_message) is not None:
             return
 
+        if isinstance(original_user_message, str):
+            from agent.context_references import strip_context_footers
+
+            original_user_message = strip_context_footers(original_user_message)
         kind = detect_reaction(original_user_message)
         if kind:
             reaction_callback(kind)
