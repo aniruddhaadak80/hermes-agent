@@ -862,7 +862,7 @@ def _whole_file_rewrite_hint(task_id: str, resolved: str | None, new_content: st
     backend the write targets), never the host path: on a remote backend the host file is a
     different file, and a host FIFO at that path would block the write lock forever. Bounded size
     and a line multiset comparison (linear) instead of a sequence diff (quadratic on repeated lines)."""
-    if not resolved or not (_REWRITE_HINT_MIN_CHARS <= len(new_content) <= _REWRITE_HINT_MAX_CHARS):
+    if not resolved:
         return None
     try:
         result = _get_file_ops(task_id).read_file_raw(resolved)
@@ -870,6 +870,15 @@ def _whole_file_rewrite_hint(task_id: str, resolved: str | None, new_content: st
         if getattr(result, "error", None) or not isinstance(old, str):
             return None
     except Exception:
+        return None
+    # A byte-identical re-send is wasteful at ANY size (#158050). The write still
+    # runs, so mtime and the staleness baseline are unchanged.
+    if old == new_content and len(new_content) <= _REWRITE_HINT_MAX_CHARS:
+        return (
+            "Nothing changed - the file already has exactly this content. "
+            "Do not write it again; use patch for partial changes."
+        )
+    if not (_REWRITE_HINT_MIN_CHARS <= len(new_content) <= _REWRITE_HINT_MAX_CHARS):
         return None
     if not (_REWRITE_HINT_MIN_CHARS <= len(old) <= _REWRITE_HINT_MAX_CHARS):
         return None
